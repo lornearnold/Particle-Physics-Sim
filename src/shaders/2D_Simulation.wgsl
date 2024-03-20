@@ -37,7 +37,7 @@ struct Settings {
     friction_coefficient: f32,
     rotation: i32,
     linear_contact_bonds: i32,
-    gravity_acc: f32,
+    gravity_acc: f32, // make this  a vector with an x and y acceleration 
     stiffness: f32,
     bonds_tear: i32,
     bond_force_limit: f32
@@ -72,6 +72,8 @@ struct Material {
 
 
 const deltaTime: f32 = 0.0000390625;
+// deltaTime should be a function of the particle mass and stiffness dt = sqrt(min_particle_mass/max_parallel_stiffness)
+// It's more complicated than that, but that is a good starting point. At the very least we should check to see what that calc would give us relative to what we're using.
 const PI = 3.141592653589793238;
 
 @compute @workgroup_size(256)
@@ -81,12 +83,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let mat_id = material_pointers[id];
 
     let damping: f32 = 0.2; // Damping factor, can be adjusted
+    // MTIF ("move to input file", see explanation below)
+    // This is my first time making what I expect will be a recurring comment, so I'll explain it here.
+    // I think we should keep all variables in a separate file of input parameters. 
+    // This may cost us some flexibility in terms of the simulator being interactive, but we're getting to the point where we're tryin to be scientific in our approach. 
+    // And that involves a fairly rigid, controlled environment anyway. 
+    // We can figure out a way to bring back an interactive mode when the bond physics is working 
 
     var net_force = vec2(0.0, 0.0);
     var net_moment = 0.0;
 
     //Bonds
-    let bond_shear_lim = 0.5;
+    let bond_shear_lim = 0.5; // MTIF
     var bonded_particles = array<i32, 6u>(-1,-1,-1,-1,-1,-1);
     if settings.bonds != 0 {
         let start = bond_info[id].x;
@@ -111,7 +119,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     if settings.bonds == 3 {
                         let ideal_rot = rot[bond_id];
                         let rot_disp = rot[id] - rot[bond_id];
-                        net_moment -= (radii[id])*rot_disp/10000.0;
+                        net_moment -= (radii[id])*rot_disp/10000.0; // MTIF
 
                     }
                 } else {
@@ -228,8 +236,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let b = contacts[i].b;
             let overlap = max(-distance(a, b), 0.0);
             
-            var normal_stiffness = 10.0;
-            var shear_stiffness = 0.25;
+            var normal_stiffness = 10.0; // MTIF
+            var shear_stiffness = 0.25; // MTIF
             if mat_id != -1 {
                 normal_stiffness = (materials[(material_pointers[b])].normal_stiffness);
                 shear_stiffness = (materials[(material_pointers[b])].shear_stiffness);
@@ -263,27 +271,37 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     
-    // Apply sum of forces and gravity to velocities
-    var density = 1.0;
+    var density = 1.0; // MTIF
+    // Move laws of motion to the beginning of the calculation cycle
+        // Let's rethink this and break it down into its components and put them in the right order.
+        // Translational motion, then rotational motion
+        // The outcome will be an updated position and orientation.
+        // The velocity we use will be a temporary use, half step (i.e., t + dt/2) velocity
+    
+    // START{Laws of Motion}
+        // Translational Motion
     if mat_id != -1 {
         density = materials[mat_id].density;
     }
-    let mass1 = density * PI * radii[id] * radii[id];
-    let rot_inertia = 0.5*mass1*radii[id]*radii[id];
-    velocities_buf[id] = velocities[id] + net_force/mass1;
-    rot_vel_buf[id] = rot_vel[id] + net_moment/rot_inertia;
+    let mass1 = density * PI * radii[id] * radii[id]; // make it a function mass(density,radius)
+    let half_step_velocity = velocities[id] + 0.5 * (resultant_force/mass1 - grav) * deltaTime
+        // Rotational Motion
+    let rot_inertia = 0.5 * mass1 * radii[id] * radii[id]; // make it a function rot_inertia(density,radius)
+    let half_step_ang_vel = rot_vel[id] + 0.5 * net_moment/rot_inertia) * deltaTime;
+    
+    rot_vel_buf[id] = 
     if settings.gravity == 1 && settings.planet_mode == 1  {
         let delta = (vec2(0.0, 0.0) - positions[id]);
         velocities_buf[id] += delta/length(delta) * 9.81 * settings.gravity_acc * deltaTime;
     } else if settings.gravity == 1 {
-        let gravity = 9.81 * settings.gravity_acc * deltaTime;
+        let gravity = 9.81 * settings.gravity_acc * deltaTime; // MTIF (9.81)
         velocities_buf[id] += vec2(0.0, -gravity);
     }
     /// BS Walls
     let pos = positions[id];
     let rad = radii[id];
-    let elasticity = 0.5;
-    let anti_stick_coating = 0.01;
+    let elasticity = 0.5; // MTIF
+    let anti_stick_coating = 0.01; // MTIF
     let yH = settings.vert_bound;
     let xW = settings.hor_bound;
 

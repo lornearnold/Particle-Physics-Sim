@@ -100,7 +100,7 @@ impl Settings {
         //particle settings
         let max_radius = 0.1/3.2;
         let variable_rad = true;
-        let holeyness = 1.7;
+        let holeyness = 1.7; // replace with "porosity", which has a standard definition: 1 - particle_volume/total_volume
         let min_radius = max_radius/holeyness;
         let max_bonds = 6;
         let max_contacts = 8;
